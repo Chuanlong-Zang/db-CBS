@@ -302,11 +302,11 @@ int main(int argc, char* argv[]) {
     // std::string outputFileSimple;
     desc.add_options()
       ("help", "produce help message")
-      ("input,i", po::value<std::string>(&inputFile)->required(), "input file (yaml)")
-      ("output,o", po::value<std::string>(&outputFile)->required(), "output file (yaml)")
-      ("joint,jnt", po::value<std::string>(&jointFile)->required(), "joint output file (yaml)")
-      ("optimization,opt", po::value<std::string>(&optimizationFile)->required(), "optimization file (yaml)")
-      ("cfg,c", po::value<std::string>(&cfgFile)->required(), "configuration file (yaml)");
+      ("input,i", po::value<std::string>(&inputFile)->default_value("example/problem.yaml"), "input file (yaml)")
+      ("output,o", po::value<std::string>(&outputFile)->default_value("results/solution.yaml"), "output file (yaml)")
+      ("joint,jnt", po::value<std::string>(&jointFile)->default_value("results/joint.yaml"), "joint output file (yaml)")
+      ("optimization,opt", po::value<std::string>(&optimizationFile)->default_value("results/opt.yaml"), "optimization file (yaml)")
+      ("cfg,c", po::value<std::string>(&cfgFile)->default_value("example/cfg.yaml"), "configuration file (yaml)");
 
     try {
       po::variables_map vm;
