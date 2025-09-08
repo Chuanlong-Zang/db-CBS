@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(DBCBS LANGUAGES CXX)
 
 # ---------------- options ----------------
-option(DBCBS_BUILD_DRIVER     "Build db_cbs CLI (BIN mode)" ON)
-option(DBCBS_BUILD_EXAMPLES   "Build extra example apps (kcbs/ompl demos)" OFF)
+option(DBCBS_BUILD_DRIVER       "Build db_cbs CLI (BIN mode)" ON)
+option(DBCBS_BUILD_EXAMPLES     "Build extra example apps (kcbs/ompl demos)" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,10 +17,18 @@ find_package(yaml-cpp REQUIRED)
 find_package(fcl REQUIRED)
 find_package(ompl REQUIRED)   # Some installs export a target; others only variables
 
+# msgpack (header-only on many systems). Try to find include path gracefully.
+find_path(MSGPACK_INCLUDE_DIR msgpack.hpp
+        PATH_SUFFIXES msgpack include
+        DOC "Path to msgpack.hpp (msgpack-c).")
+if (MSGPACK_INCLUDE_DIR)
+    message(STATUS "Found msgpack headers at: ${MSGPACK_INCLUDE_DIR}")
+else()
+    message(STATUS "msgpack.hpp not found via CMake; assuming vendored/available in include paths.")
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND CMAKE_PREFIX_PATH
-            "/opt/openrobots"
-    )
+    list(APPEND CMAKE_PREFIX_PATH "/opt/openrobots")
 endif()
 
 # Normalize imported targets / vars
@@ -61,39 +69,58 @@ endif()
 # ---------------- includes (public) ------
 set(DBCBS_INC_PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/lib
         ${CMAKE_CURRENT_SOURCE_DIR}/deps/libMultiRobotPlanning/include
 )
+
+if (MSGPACK_INCLUDE_DIR)
+    list(APPEND DBCBS_INC_PUBLIC ${MSGPACK_INCLUDE_DIR})
+endif()
+
+# ---------------- dynoplan / optimizer ----
+add_subdirectory(dynoplan)  # defines idbastar::optimization and its headers
 
 # ---------------- core lib (SOURCE mode) -
 add_library(dbcbs_core STATIC
         src/robots.cpp
-        # Add any additional .cpp files you split out later, e.g.:
-        # src/dbcbs_core_api.cpp
+        lib/dbcbs_core.cpp
 )
 add_library(dbcbs::core ALIAS dbcbs_core)
+
 target_compile_features(dbcbs_core PUBLIC cxx_std_17)
 target_include_directories(dbcbs_core
         PUBLIC
         ${DBCBS_INC_PUBLIC}
+        # Ensure headers available when compiling the core (needed by dbcbs_core.cpp)
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/include>
 )
 
-# Link minimal essentials used by robots.cpp (OMPL/FCL/Eigen/yaml-cpp)
+# Paths for runtime (your previous defines)
+target_compile_definitions(dbcbs_core PRIVATE
+        DBCBS_DYNOBENCH_BASE="${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/dynobench/"
+        DBCBS_MOTIONS_BASE="${CMAKE_CURRENT_SOURCE_DIR}/motions"
+)
+
+# Link minimal essentials used by robots.cpp / dbcbs_core.cpp
 target_link_libraries(dbcbs_core
         PUBLIC
         Eigen3::Eigen
         ${YAML_TGT}
-        ${FCL_LIBRARIES}
         ${CCD_LIBRARIES}
 )
 
+# FCL (prefer imported target; also link raw libs if present)
 if (NOT "${FCL_TGT}" STREQUAL "")
     target_link_libraries(dbcbs_core PUBLIC ${FCL_TGT})
 endif()
+if (FCL_LIBRARIES)
+    target_link_libraries(dbcbs_core PUBLIC ${FCL_LIBRARIES})
+endif()
 
+# OMPL (target or legacy variables)
 if (NOT "${OMPL_TGT}" STREQUAL "")
     target_link_libraries(dbcbs_core PUBLIC ${OMPL_TGT})
 else()
-    # Fallback to legacy variables
     if (OMPL_INCLUDE_DIRS)
         target_include_directories(dbcbs_core PUBLIC ${OMPL_INCLUDE_DIRS})
     endif()
@@ -102,41 +129,47 @@ else()
     endif()
 endif()
 
+# DynoBench optimizer for opt.yaml
+target_link_libraries(dbcbs_core PRIVATE idbastar::optimization)
+
 # ---------------- driver (BIN mode) ------
 if (DBCBS_BUILD_DRIVER)
-    add_executable(db_cbs src/db_cbs.cpp)
-    target_compile_features(db_cbs PRIVATE cxx_std_17)
-    target_link_libraries(db_cbs PRIVATE
+    add_executable(dbcbs src/db_cbs.cpp)
+    target_compile_features(dbcbs PRIVATE cxx_std_17)
+
+    target_link_libraries(dbcbs PRIVATE
             dbcbs::core
             Boost::program_options
             ${YAML_TGT}
     )
 
-    if (NOT "${FCL_TGT}" STREQUAL "")
-        target_link_libraries(db_cbs PRIVATE ${FCL_TGT})
-    endif()
-
+    # OMPL add-ons if needed (core already links, this is harmless)
     if (NOT "${OMPL_TGT}" STREQUAL "")
-        target_link_libraries(db_cbs PRIVATE ${OMPL_TGT})
+        target_link_libraries(dbcbs PRIVATE ${OMPL_TGT})
     else()
         if (OMPL_INCLUDE_DIRS)
-            target_include_directories(db_cbs PRIVATE ${OMPL_INCLUDE_DIRS})
+            target_include_directories(dbcbs PRIVATE ${OMPL_INCLUDE_DIRS})
         endif()
         if (OMPL_LIBRARIES)
-            target_link_libraries(db_cbs PRIVATE ${OMPL_LIBRARIES})
+            target_link_libraries(dbcbs PRIVATE ${OMPL_LIBRARIES})
         endif()
+    endif()
+
+    # FCL add-ons if needed (core already links, this is harmless)
+    if (NOT "${FCL_TGT}" STREQUAL "")
+        target_link_libraries(dbcbs PRIVATE ${FCL_TGT})
     endif()
 
     # Paths for runtime (your previous defines)
-    target_compile_definitions(db_cbs PRIVATE
+    target_compile_definitions(dbcbs PRIVATE
             DBCBS_DYNOBENCH_BASE="${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/dynobench/"
             DBCBS_MOTIONS_BASE="${CMAKE_CURRENT_SOURCE_DIR}/motions"
     )
 
-    add_subdirectory(dynoplan)  # defines idbastar::optimization
-    target_link_libraries(db_cbs PRIVATE idbastar::optimization)
-    target_compile_definitions(db_cbs PRIVATE DBCBS_WITH_OPTIMIZER=1)
-    target_include_directories(db_cbs PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/include)
+
+    # core already links optimizer; linking again is fine and explicit
+    target_link_libraries(dbcbs PRIVATE idbastar::optimization)
+    target_include_directories(dbcbs PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/include)
 
 endif()
 
