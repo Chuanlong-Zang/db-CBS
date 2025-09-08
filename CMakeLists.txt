@@ -173,6 +173,69 @@ if (DBCBS_BUILD_DRIVER)
 
 endif()
 
+# =========================
+# SST (OMPL control) build
+# =========================
+option(DBCBS_BUILD_SST "Build SST (OMPL) core library and CLI" ON)
+
+if (DBCBS_BUILD_SST)
+
+    # ---- Core library used by both driver and platform (SOURCE mode)
+    add_library(dbcbs_sst_core STATIC
+            lib/sst_core.cpp
+    )
+    add_library(dbcbs::sst_core ALIAS dbcbs_sst_core)
+    target_compile_features(dbcbs_sst_core PUBLIC cxx_std_17)
+    target_include_directories(dbcbs_sst_core
+            PUBLIC
+            ${DBCBS_INC_PUBLIC}               # src/ + external includes
+            ${CMAKE_CURRENT_SOURCE_DIR}/lib   # for sst_core.hpp
+    )
+    # We reuse robots/fcl/ompl from dbcbs_core linkage
+    target_link_libraries(dbcbs_sst_core
+            PUBLIC
+            dbcbs::core        # brings robots.cpp + FCL + Eigen + yaml target
+    )
+    if (NOT "${OMPL_TGT}" STREQUAL "")
+        target_link_libraries(dbcbs_sst_core PUBLIC ${OMPL_TGT})
+    else()
+        if (OMPL_INCLUDE_DIRS)
+            target_include_directories(dbcbs_sst_core PUBLIC ${OMPL_INCLUDE_DIRS})
+        endif()
+        if (OMPL_LIBRARIES)
+            target_link_libraries(dbcbs_sst_core PUBLIC ${OMPL_LIBRARIES})
+        endif()
+    endif()
+
+    target_compile_definitions(dbcbs_sst_core PRIVATE
+            DBCBS_DYNOBENCH_BASE="${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/dynobench/"
+            DBCBS_MOTIONS_BASE="${CMAKE_CURRENT_SOURCE_DIR}/motions"
+    )
+
+    # ---- CLI driver (BIN mode)
+    add_executable(dbcbs_sst
+            src/sst_driver.cpp
+    )
+    target_compile_features(dbcbs_sst PRIVATE cxx_std_17)
+    target_link_libraries(dbcbs_sst
+            PRIVATE
+            dbcbs::sst_core
+            Boost::program_options
+            ${YAML_TGT}
+    )
+    if (NOT "${OMPL_TGT}" STREQUAL "")
+        target_link_libraries(dbcbs_sst PRIVATE ${OMPL_TGT})
+    else()
+        if (OMPL_INCLUDE_DIRS)
+            target_include_directories(dbcbs_sst PRIVATE ${OMPL_INCLUDE_DIRS})
+        endif()
+        if (OMPL_LIBRARIES)
+            target_link_libraries(dbcbs_sst PRIVATE ${OMPL_LIBRARIES})
+        endif()
+    endif()
+    target_include_directories(dbcbs_sst PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/lib)
+endif()
+
 # ---------------- examples (optional) ----
 if (DBCBS_BUILD_EXAMPLES)
     add_executable(main_ompl src/main_ompl.cpp)
