@@ -1,181 +1,153 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.16)
+project(DBCBS LANGUAGES CXX)
 
-project(db-CBS)
+# ---------------- options ----------------
+option(DBCBS_BUILD_DRIVER     "Build db_cbs CLI (BIN mode)" ON)
+option(DBCBS_BUILD_EXAMPLES   "Build extra example apps (kcbs/ompl demos)" OFF)
 
-find_package(Boost 1.58 REQUIRED COMPONENTS program_options)
-find_package(Eigen3 REQUIRED)
-find_package(PkgConfig)
-# pkg_check_modules(YAML REQUIRED yaml-cpp)
-list(APPEND CMAKE_PREFIX_PATH
-        "/opt/openrobots"
-)
-find_package(yaml-cpp REQUIRED)
-find_package(fcl REQUIRED)
-find_package(ompl REQUIRED)   # provides ${OMPL_LIBRARIES} and ${OMPL_INCLUDE_DIRS}
-include_directories(${OMPL_INCLUDE_DIRS})
-
-
-
-add_subdirectory(dynoplan)
-
-# set(ompl_ROOT ${}/k_cbs/ompl)
-# find_package(ompl)
-# pkg_check_modules(OMPL REQUIRED ompl)
-
-# Enable C++17 and warnings
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+add_compile_options(-Wall -Wextra)
 
-# add_subdirectory(k_cbs/Kinodynamic-Conflict-Based-Search EXCLUDE_FROM_ALL)
+# ---------------- deps -------------------
+find_package(Boost 1.58 REQUIRED COMPONENTS program_options)
+find_package(Eigen3 REQUIRED)
+find_package(yaml-cpp REQUIRED)
+find_package(fcl REQUIRED)
+find_package(ompl REQUIRED)   # Some installs export a target; others only variables
 
-include_directories(
-  ${EIGEN3_INCLUDE_DIR}
-  ${CMAKE_SOURCE_DIR}/deps/libMultiRobotPlanning/include
-  ${FCL_INCLUDE_DIRS}
-#  ${CMAKE_SOURCE_DIR}/k_cbs/Kinodynamic-Conflict-Based-Search/src
-#  ${CMAKE_BINARY_DIR}/k_cbs/Kinodynamic-Conflict-Based-Search/src
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND CMAKE_PREFIX_PATH
+            "/opt/openrobots"
+    )
+endif()
+
+# Normalize imported targets / vars
+set(YAML_TGT yaml-cpp)
+
+# FCL target can be fcl::fcl or FCL::fcl
+set(FCL_TGT "")
+if (TARGET fcl::fcl)
+    set(FCL_TGT fcl::fcl)
+elseif (TARGET FCL::fcl)
+    set(FCL_TGT FCL::fcl)
+endif()
+
+# --- libccd (needed by FCL) ---------------------------------
+find_package(PkgConfig QUIET)
+if (PkgConfig_FOUND)
+    pkg_check_modules(CCD QUIET ccd)
+endif()
+
+# Fallback if no pkg-config:
+if (NOT CCD_FOUND)
+    find_library(CCD_LIBRARY NAMES ccd libccd)
+    if (CCD_LIBRARY)
+        set(CCD_LIBRARIES ${CCD_LIBRARY})
+    endif()
+endif()
+
+if (NOT CCD_LIBRARIES)
+    message(FATAL_ERROR "libccd not found. Install libccd-dev (Ubuntu/Debian) or provide CCD_LIBRARIES.")
+endif()
+
+# OMPL may be a target or just variables
+set(OMPL_TGT "")
+if (TARGET ompl)
+    set(OMPL_TGT ompl)
+endif()
+
+# ---------------- includes (public) ------
+set(DBCBS_INC_PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/deps/libMultiRobotPlanning/include
 )
 
-add_library(motion_planning_common
-  src/robots.cpp
+# ---------------- core lib (SOURCE mode) -
+add_library(dbcbs_core STATIC
+        src/robots.cpp
+        # Add any additional .cpp files you split out later, e.g.:
+        # src/dbcbs_core_api.cpp
 )
-target_include_directories(motion_planning_common
-  PRIVATE ${CMAKE_BINARY_DIR}/deps/fcl/include
-  PRIVATE ${CMAKE_SOURCE_DIR}/deps/fcl/include
-)
-set_property(TARGET motion_planning_common PROPERTY POSITION_INDEPENDENT_CODE ON)
-
-## ompl
-# add_executable(main_ompl
-#   src/main_ompl.cpp
-#   # src/robots.cpp
-# )
-# target_link_libraries(main_ompl
-#   motion_planning_common
-#   ${Boost_LIBRARIES}
-#   ${YAML_LIBRARIES}
-#   ompl
-#   ${FCL_LIBRARIES}
-# )
-# target_include_directories(main_ompl PUBLIC
-#   ${YAML_INCLUDE_DIRS}
-#   ${FCL_INCLUDE_DIRS}
-# )
-
-
-## kcbs
-
-# add_executable(main_kcbs
-#   src/main_kcbs.cpp
-#   # src/robots.cpp
-# )
-# target_link_libraries(main_kcbs
-#   motion_planning_common
-#   ${Boost_LIBRARIES}
-#   ${YAML_LIBRARIES}
-#   ompl
-#   ${FCL_LIBRARIES}
-# )
-# target_include_directories(main_kcbs PUBLIC
-#   ${YAML_INCLUDE_DIRS}
-#   ${FCL_INCLUDE_DIRS}
-# )
-
-# ## dbastar
-
-# add_executable(dbastar
-#   src/main_dbastar.cpp
-
-# )
-# target_link_libraries(dbastar
-#   motion_planning_common
-#   ${Boost_LIBRARIES}
-#   ${YAML_LIBRARIES}
-#   ompl
-#   ${FCL_LIBRARIES}
-# )
-# target_include_directories(dbastar PUBLIC
-#   ${YAML_INCLUDE_DIRS}
-#   ${FCL_INCLUDE_DIRS}
-# )
-
-## main_ompl_geometric
-
-# add_executable(main_ompl_geometric
-#   src/main_ompl_geometric.cpp
-#
-# )
-# target_link_libraries(main_ompl_geometric
-#   motion_planning_common
-#   ${Boost_LIBRARIES}
-#   ${YAML_LIBRARIES}
-#   ompl
-#   ${FCL_LIBRARIES}
-# )
-# target_include_directories(main_ompl_geometric PUBLIC
-#   ${YAML_INCLUDE_DIRS}
-#   ${FCL_INCLUDE_DIRS}
-# )
-## db_cbs
-
-add_executable(db_cbs
-  src/db_cbs.cpp
-  # src/robots.cpp
+add_library(dbcbs::core ALIAS dbcbs_core)
+target_compile_features(dbcbs_core PUBLIC cxx_std_17)
+target_include_directories(dbcbs_core
+        PUBLIC
+        ${DBCBS_INC_PUBLIC}
 )
 
-target_include_directories(db_cbs PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/include
+# Link minimal essentials used by robots.cpp (OMPL/FCL/Eigen/yaml-cpp)
+target_link_libraries(dbcbs_core
+        PUBLIC
+        Eigen3::Eigen
+        ${YAML_TGT}
+        ${FCL_LIBRARIES}
+        ${CCD_LIBRARIES}
 )
 
+if (NOT "${FCL_TGT}" STREQUAL "")
+    target_link_libraries(dbcbs_core PUBLIC ${FCL_TGT})
+endif()
 
-#target_link_libraries(main_check_multirobot PRIVATE
-#  dynobench::dynobench
-#  idbastar::optimization
-#  motion_planning_common
-#  ${Boost_LIBRARIES}
-#  ${YAML_LIBRARIES}
-#  ompl
-#  ${FCL_LIBRARIES}
-#)
+if (NOT "${OMPL_TGT}" STREQUAL "")
+    target_link_libraries(dbcbs_core PUBLIC ${OMPL_TGT})
+else()
+    # Fallback to legacy variables
+    if (OMPL_INCLUDE_DIRS)
+        target_include_directories(dbcbs_core PUBLIC ${OMPL_INCLUDE_DIRS})
+    endif()
+    if (OMPL_LIBRARIES)
+        target_link_libraries(dbcbs_core PUBLIC ${OMPL_LIBRARIES})
+    endif()
+endif()
 
+# ---------------- driver (BIN mode) ------
+if (DBCBS_BUILD_DRIVER)
+    add_executable(db_cbs src/db_cbs.cpp)
+    target_compile_features(db_cbs PRIVATE cxx_std_17)
+    target_link_libraries(db_cbs PRIVATE
+            dbcbs::core
+            Boost::program_options
+            ${YAML_TGT}
+    )
 
+    if (NOT "${FCL_TGT}" STREQUAL "")
+        target_link_libraries(db_cbs PRIVATE ${FCL_TGT})
+    endif()
 
-target_link_libraries(db_cbs PRIVATE
-  idbastar::optimization
-  motion_planning_common
-  ${Boost_LIBRARIES}
-  yaml-cpp
-  ompl
-  ${FCL_LIBRARIES}
-)
-# Absolute, build-time fallbacks for data roots
-target_compile_definitions(db_cbs PRIVATE
-        DBCBS_DYNOBENCH_BASE="${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/dynobench/"
-        DBCBS_MOTIONS_BASE="${CMAKE_CURRENT_SOURCE_DIR}/motions"
-)
+    if (NOT "${OMPL_TGT}" STREQUAL "")
+        target_link_libraries(db_cbs PRIVATE ${OMPL_TGT})
+    else()
+        if (OMPL_INCLUDE_DIRS)
+            target_include_directories(db_cbs PRIVATE ${OMPL_INCLUDE_DIRS})
+        endif()
+        if (OMPL_LIBRARIES)
+            target_link_libraries(db_cbs PRIVATE ${OMPL_LIBRARIES})
+        endif()
+    endif()
 
-# target_include_directories(main_ompl PUBLIC
-#   ${YAML_INCLUDE_DIRS}
-#   ${FCL_INCLUDE_DIRS}
-# )
+    # Paths for runtime (your previous defines)
+    target_compile_definitions(db_cbs PRIVATE
+            DBCBS_DYNOBENCH_BASE="${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/dynobench/"
+            DBCBS_MOTIONS_BASE="${CMAKE_CURRENT_SOURCE_DIR}/motions"
+    )
 
+    add_subdirectory(dynoplan)  # defines idbastar::optimization
+    target_link_libraries(db_cbs PRIVATE idbastar::optimization)
+    target_compile_definitions(db_cbs PRIVATE DBCBS_WITH_OPTIMIZER=1)
+    target_include_directories(db_cbs PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dynoplan/include)
 
-# Python bindings
-# add_subdirectory(deps/pybind11 EXCLUDE_FROM_ALL)
+endif()
 
-# pybind11_add_module(motionplanningutils
-#   src/python_bindings.cpp
-# )
-# target_include_directories(motionplanningutils
-#   PRIVATE ${CMAKE_BINARY_DIR}/deps/fcl/include
-#   PRIVATE ${CMAKE_SOURCE_DIR}/deps/fcl/include
-# )
-# target_link_libraries(motionplanningutils PRIVATE
-#   motion_planning_common
-#   ${Boost_LIBRARIES}
-#   ${YAML_LIBRARIES}
-#   ompl
-#   ${FCL_LIBRARIES}
-# )
+# ---------------- examples (optional) ----
+if (DBCBS_BUILD_EXAMPLES)
+    add_executable(main_ompl src/main_ompl.cpp)
+    target_link_libraries(main_ompl PRIVATE dbcbs::core)
+
+    add_executable(main_kcbs src/main_kcbs.cpp)
+    target_link_libraries(main_kcbs PRIVATE dbcbs::core)
+
+    add_executable(main_ompl_geometric src/main_ompl_geometric.cpp)
+    target_link_libraries(main_ompl_geometric PRIVATE dbcbs::core)
+endif()
