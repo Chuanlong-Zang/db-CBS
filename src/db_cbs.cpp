@@ -31,6 +31,17 @@
 // #include "multirobot_trajectory.hpp"
 #include "dynoplan/optimization/multirobot_optimization.hpp"
 
+#include <filesystem>
+#include <cstdlib>
+#if defined(_WIN32)
+  #include <windows.h>
+#elif defined(__APPLE__)
+  #include <mach-o/dyld.h>
+#else
+  #include <unistd.h> // readlink
+#endif
+
+namespace fs = std::filesystem;
 namespace ob = ompl::base;
 namespace oc = ompl::control;
 
@@ -277,8 +288,6 @@ void export_joint_solutions(const std::vector<LowLevelPlan<AStarNode*,ob::State*
     
 }
 
-#define dynobench_base "../dynoplan/dynobench/"
-
 int main(int argc, char* argv[]) {
     
     namespace po = boost::program_options;
@@ -384,13 +393,13 @@ int main(int argc, char* argv[]) {
         if (iter == robot_motions.end()) {
             std::string motionsFile;
             if (robotType == "unicycle_first_order_0" || robotType == "unicycle_first_order_0_sphere") {
-                motionsFile = "../motions/unicycle_first_order_0_sorted.msgpack";
+                motionsFile = (DBCBS_MOTIONS_BASE "/unicycle_first_order_0_sorted.msgpack");
              } else if (robotType == "unicycle_second_order_0") {
-                motionsFile = "../motions/unicycle_second_order_0_sorted.msgpack";
+                motionsFile = (DBCBS_MOTIONS_BASE "/unicycle_second_order_0_sorted.msgpack");
             } else if (robotType == "double_integrator_0") {
-                motionsFile = "../motions/double_integrator_0_sorted.msgpack";
+                motionsFile = (DBCBS_MOTIONS_BASE "/double_integrator_0_sorted.msgpack");
             } else if (robotType == "car_first_order_with_1_trailers_0") {
-                motionsFile = "../motions/car_first_order_with_1_trailers_0_sorted.msgpack";
+                motionsFile = (DBCBS_MOTIONS_BASE "/car_first_order_with_1_trailers_0_sorted.msgpack");
             } else {
                 throw std::runtime_error("Unknown motion filename for this robottype!");
             }
@@ -535,7 +544,7 @@ int main(int argc, char* argv[]) {
                 bool feasible = execute_optimizationMultiRobot(inputFile,
                                                     outputFile, 
                                                     optimizationFile,
-                                                    dynobench_base,
+                                                    DBCBS_DYNOBENCH_BASE,
                                                     sum_robot_cost);
                 if (feasible) {
                     return 0;
