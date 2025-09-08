@@ -9,6 +9,7 @@
 namespace ob = ompl::base;
 namespace oc = ompl::control;
 
+/***
 class RobotSingleIntegrator2D : public Robot
 {
 public:
@@ -73,7 +74,7 @@ public:
 
   virtual fcl::Transform3f getTransform(
       const ompl::base::State *state,
-      size_t /*part*/) override
+      size_t part) override
   {
     auto stateTyped = state->as<ob::RealVectorStateSpace::StateType>();
 
@@ -81,13 +82,16 @@ public:
     result = Eigen::Translation<float, 3>(fcl::Vector3f(stateTyped->values[0], stateTyped->values[1], 0));
     return result;
   }
-  virtual void setPosition(ompl::base::State *state, const fcl::Vector3f position, size_t /*part*/) override
+  virtual void setPosition(ompl::base::State *state, const fcl::Vector3f position, size_t part) override
   {
     auto stateTyped = state->as<ob::RealVectorStateSpace::StateType>();
     stateTyped->values[0]=position(0);
     stateTyped->values[1]=position(1);
   }
 };
+
+***/
+
 /////////////////////////////////////////////////////////////////////////////////////////
 
 class RobotDoubleIntegrator2D : public Robot
@@ -98,9 +102,10 @@ public:
     float v_min, 
     float v_max,
     float a_min,
-    float a_max)
+    float a_max,
+    float radius=0.15f)
   {
-    geom_.emplace_back(new fcl::Spheref(0.15));
+    geom_.emplace_back(new fcl::Spheref(radius));
     auto space(std::make_shared<StateSpace>());
     space->setPositionBounds(position_bounds);
 
@@ -281,15 +286,17 @@ public:
 };
 
 //////////////////////////////////////////////////////////////////////////////////////////
+
 class RobotUnicycleFirstOrder : public Robot
 {
 public:
   RobotUnicycleFirstOrder(
     const ompl::base::RealVectorBounds& position_bounds,
     float v_min, float v_max,
-    float w_min, float w_max)
+    float w_min, float w_max,
+    float sx=0.5f, float sy=0.25f)
   {
-    geom_.emplace_back(new fcl::Boxf(0.5, 0.25, 1.0));
+    geom_.emplace_back(new fcl::Boxf(sx, sy, 1.0));
 
     auto space(std::make_shared<ob::SE2StateSpace>());
     space->setBounds(position_bounds);
@@ -373,16 +380,19 @@ public:
     stateTyped->setY(position(1));
   }
 };
+
 //////////////////////////////////////////////////////////////////////////////////////////////////
+
 class RobotUnicycleFirstOrderSphere : public Robot
 {
 public:
   RobotUnicycleFirstOrderSphere(
     const ompl::base::RealVectorBounds& position_bounds,
     float v_min, float v_max,
-    float w_min, float w_max)
+    float w_min, float w_max,
+    float radius=0.40f)
   {
-    geom_.emplace_back(new fcl::Spheref(0.4));
+    geom_.emplace_back(new fcl::Spheref(radius));
 
     auto space(std::make_shared<ob::SE2StateSpace>());
     space->setBounds(position_bounds);
@@ -466,7 +476,9 @@ public:
     stateTyped->setY(position(1));
   }
 };
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
+
 class RobotUnicycleSecondOrder : public Robot
 {
 public:
@@ -475,9 +487,11 @@ public:
       float v_limit,      // max velocity in m/s
       float w_limit,      // max angular velocity in rad/s
       float a_limit,      // max accelleration in m/s^2
-      float w_dot_limit) // max angular acceleration in rad/s^2
+      float w_dot_limit,  // max angular acceleration in rad/s^2
+      float sx=0.5f,
+      float sy=0.25f)
   {
-    geom_.emplace_back(new fcl::Boxf(0.5, 0.25, 1.0));
+    geom_.emplace_back(new fcl::Boxf(sx, sy, 1.0));
 
     auto space(std::make_shared<StateSpace>());
     space->setPositionBounds(position_bounds);
@@ -725,7 +739,10 @@ protected:
     }
   };
 };
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
+
+/***
 class RobotCarFirstOrder : public Robot
 {
 public:
@@ -791,7 +808,7 @@ public:
 
   virtual fcl::Transform3f getTransform(
       const ompl::base::State *state,
-      size_t /*part*/) override
+      size_t part) override
   {
     auto stateTyped = state->as<StateSpace::StateType>();
 
@@ -802,7 +819,7 @@ public:
     return result;
   }
 
-  virtual void setPosition(ompl::base::State *state, const fcl::Vector3f position, size_t /*part*/) override
+  virtual void setPosition(ompl::base::State *state, const fcl::Vector3f position, size_t part) override
   {
     auto stateTyped = state->as<StateSpace::StateType>();
     stateTyped->setX(position(0));
@@ -898,6 +915,7 @@ protected:
 protected:
   float L_;
 };
+***/
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -911,14 +929,18 @@ public:
       float phi_min,
       float phi_max,
       float L,
-      const std::vector<float>& hitch_lengths)
+      const std::vector<float>& hitch_lengths,
+      float head_sx=0.5f,
+      float head_sy=0.25f,
+      float trailer_sx=0.3f,
+      float trailer_sy=0.25f)
       : Robot()
       , L_(L)
       , hitch_lengths_(hitch_lengths)
   {
-    geom_.emplace_back(new fcl::Boxf(0.5, 0.25, 1.0));
+    geom_.emplace_back(new fcl::Boxf(head_sx, head_sy, 1.0));
     for (size_t i = 0; i < hitch_lengths.size(); ++i) {
-      geom_.emplace_back(new fcl::Boxf(0.3, 0.25, 1.0));
+      geom_.emplace_back(new fcl::Boxf(trailer_sx, trailer_sy, 1.0));
     }
 
     auto space(std::make_shared<StateSpace>(hitch_lengths.size()));
@@ -1177,6 +1199,7 @@ protected:
 };
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
+
 class MultiRobot : public Robot
 {
 public:
@@ -1293,83 +1316,51 @@ protected:
 // ////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::shared_ptr<Robot> create_robot(
-  const std::string &robotType,
-  const ob::RealVectorBounds &positionBounds)
-{
+const std::string &robotType,
+const ob::RealVectorBounds &positionBounds,
+const ShapeSpec& shape) {
+
   std::shared_ptr<Robot> robot;
-  if (robotType == "unicycle_first_order_0")
-  {
-    robot.reset(new RobotUnicycleFirstOrder(
-        positionBounds,
-        /*v_min*/ -0.5 /* m/s*/,
-        /*v_max*/ 0.5 /* m/s*/,
-        /*w_min*/ -0.5 /*rad/s*/,
-        /*w_max*/ 0.5 /*rad/s*/));
+  using K = ShapeSpec::Kind;
+
+  if (robotType == "unicycle_first_order_0") {
+    const float sx = (shape.kind==K::Box && shape.sx>0)? shape.sx : 0.5f;
+    const float sy = (shape.kind==K::Box && shape.sy>0)? shape.sy : 0.25f;
+    robot.reset(new RobotUnicycleFirstOrder(positionBounds, -0.5f, 0.5f, -0.5f, 0.5f, sx, sy));
   }
-  else if (robotType == "unicycle_first_order_0_sphere")
-  {
-    robot.reset(new RobotUnicycleFirstOrderSphere(
-        positionBounds,
-        /*v_min*/ -0.5 /* m/s*/,
-        /*v_max*/ 0.5 /* m/s*/,
-        /*w_min*/ -2.0 /*rad/s*/,
-        /*w_max*/ 2.0 /*rad/s*/));
+  else if (robotType == "unicycle_first_order_0_sphere") {
+    const float r = (shape.kind==K::Circle && shape.radius>0)? shape.radius : 0.40f;
+    robot.reset(new RobotUnicycleFirstOrderSphere(positionBounds, -0.5f, 0.5f, -2.0f, 2.0f, r));
   }
   else if (robotType == "unicycle_second_order_0")
   {
-    robot.reset(new RobotUnicycleSecondOrder(
-        positionBounds,
-        /*v_limit*/ 0.5 /*m/s*/,
-        /*w_limit*/ 0.5 /*rad/s*/,
-        /*a_limit*/ 0.25 /*m/s^2*/,
-        /*w_dot_limit*/ 0.25 /*rad/s**2*/
-        ));
+    const float sx = (shape.kind==K::Box && shape.sx>0)? shape.sx : 0.5f;
+    const float sy = (shape.kind==K::Box && shape.sy>0)? shape.sy : 0.25f;
+    robot.reset(new RobotUnicycleSecondOrder(positionBounds, 0.5f, 0.5f, 0.25f, 0.25f, sx, sy));
   }
-  else if (robotType == "car_first_order_0")
-  {
-    robot.reset(new RobotCarFirstOrder(
-        positionBounds,
-        /*v_min*/ -0.5 /* m/s*/,
-        /*v_max*/ 0.5 /* m/s*/,
-        /*phi_min*/ -M_PI/3.0f /*rad*/,
-        /*phi_max*/ M_PI/3.0f /*rad*/,
-        /*L*/ 0.25 /*m*/
-        ));
-  }
-  else if (robotType == "car_first_order_with_1_trailers_0")
-  {
-    robot.reset(new RobotCarFirstOrderWithTrailers(
-        positionBounds,
-        /*v_min*/ -0.1 /*m/s*/,
-        /*v_max*/ 0.5 /*m/s*/,
-        /*phi_min*/ -M_PI/3.0f /*rad*/,
-        /*phi_max*/ M_PI/3.0f /*rad*/,
-        /*L*/ 0.25 /*m*/,
-        /*hitch_lengths*/ {0.5} /*m*/
-        ));
-  }
-  else if (robotType == "single_integrator_0")
-  {
-    robot.reset(new RobotSingleIntegrator2D(
-        positionBounds,
-        /*v_min*/ -0.5 /* m/s*/,
-        /*v_max*/ 0.5 /* m/s*/
-        ));
+  else if (robotType == "car_first_order_with_1_trailers_0") {
+    float head_sx = 0.5f, head_sy = 0.25f, tr_sx = 0.3f, tr_sy = 0.25f;
+    if (shape.kind==K::MultiBox && shape.parts.size()>=2) {
+      float head_sx = 0.5f, head_sy = 0.25f, tr_sx = 0.3f, tr_sy = 0.25f;
+      if (shape.kind==K::MultiBox && shape.parts.size()>=2) {
+        head_sx = (shape.parts[0].sx>0? shape.parts[0].sx : head_sx);
+        head_sy = (shape.parts[0].sy>0? shape.parts[0].sy : head_sy);
+        tr_sx   = (shape.parts[1].sx>0? shape.parts[1].sx : tr_sx);
+        tr_sy   = (shape.parts[1].sy>0? shape.parts[1].sy : tr_sy);
+      }
+      robot.reset(new RobotCarFirstOrderWithTrailers(
+          positionBounds, -0.1f, 0.5f, -M_PI/3.0f, M_PI/3.0f, 0.25f, std::vector<float>{0.5f},
+          head_sx, head_sy, tr_sx, tr_sy));
+    }
   }
   else if (robotType == "double_integrator_0")
   {
-    robot.reset(new RobotDoubleIntegrator2D(
-        positionBounds,
-        /*v_min*/ -0.5 /* m/s*/,
-        /*v_max*/ 0.5 /* m/s*/,
-        /*a_min*/ -2.0 /* m/s^2*/,
-        /*a_max*/ 2.0 /* m/s^2*/
-        ));
+    const float r = (shape.kind==K::Circle && shape.radius>0)? shape.radius : 0.15f;
+    robot.reset(new RobotDoubleIntegrator2D(positionBounds, -0.5f, 0.5f, -2.0f, 2.0f, r));
   }
-  
   else
   {
-    throw std::runtime_error("Unknown robot type!");
+    throw std::runtime_error("Unknown robot type! Given type:" + robotType);
   }
   return robot;
 }

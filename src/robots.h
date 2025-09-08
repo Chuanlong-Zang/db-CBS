@@ -113,13 +113,22 @@ public:
 
 };
 
-// Factory Method
-std::shared_ptr<Robot> create_robot(
-  const std::string& robotType,
-  const ompl::base::RealVectorBounds& positionBounds);
-
 std::shared_ptr<Robot> create_joint_robot(
   std::vector<std::shared_ptr<Robot>> robots);
 
 // HACK for multi-robot
 void setMultiRobotGoals(std::shared_ptr<Robot>, std::shared_ptr<MultiRobotGoalState> goals);
+
+
+struct ShapeBoxPart { float cx{0}, cy{0}, sx{0.5f}, sy{0.25f}, angle{0}; }; // full sizes sx×sy
+struct ShapeSpec {
+  enum class Kind { Default, Circle, Box, MultiBox };
+  Kind  kind = Kind::Default;
+  float radius{0.0f};     // for Circle
+  float sx{0.0f}, sy{0.0f}; // for Box (full size, not half)
+  std::vector<ShapeBoxPart> parts; // for MultiBox
+};
+std::shared_ptr<Robot> create_robot(
+  const std::string& robotType,
+  const ompl::base::RealVectorBounds& positionBounds,
+  const ShapeSpec& shape = {});

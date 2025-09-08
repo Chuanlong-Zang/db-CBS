@@ -373,7 +373,35 @@ int main(int argc, char* argv[]) {
     std::vector<std::shared_ptr<Robot>> robots;
     for (const auto &robot_node : env["robots"]) {
         auto robotType = robot_node["type"].as<std::string>();
-        std::shared_ptr<Robot> robot = create_robot(robotType, position_bounds);
+
+        ShapeSpec shape; // defaults = “use hardcoded”
+        if (robot_node["footprint"]) {
+            const auto& fp = robot_node["footprint"];
+            const auto  s  = fp["shape"] ? fp["shape"].as<std::string>() : std::string{};
+            if (s == "circle") {
+                shape.kind   = ShapeSpec::Kind::Circle;
+                shape.radius = fp["radius"] ? fp["radius"].as<float>() : 0.0f;
+            } else if (s == "box") {
+                shape.kind = ShapeSpec::Kind::Box;
+                if (fp["size"] && fp["size"].IsSequence() && fp["size"].size()>=2) {
+                    shape.sx = fp["size"][0].as<float>();
+                    shape.sy = fp["size"][1].as<float>();
+                }
+            } else if (s == "multibox") {
+                shape.kind = ShapeSpec::Kind::MultiBox;
+                if (fp["boxes"] && fp["boxes"].IsSequence()) {
+                    for (const auto& b : fp["boxes"]) {
+                        ShapeBoxPart p;
+                        if (b["size"]) { p.sx = b["size"][0].as<float>(); p.sy = b["size"][1].as<float>(); }
+                        if (b["center"]) { p.cx = b["center"][0].as<float>(); p.cy = b["center"][1].as<float>(); }
+                        if (b["angle"]) p.angle = b["angle"].as<float>();
+                        shape.parts.push_back(p);
+                    }
+                }
+            }
+        }
+
+        std::shared_ptr<Robot> robot = create_robot(robotType, position_bounds, shape);
         robots.push_back(robot);
 
         std::vector<double> start_reals;
