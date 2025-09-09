@@ -17,7 +17,7 @@
 #include "fclStateValidityChecker.hpp"
 #include "db_astar.hpp"
 #include "planresult.hpp"
-
+#include "obstacles_yaml.hpp"
 // dynoplan optimizer (same header as your binary)
 #include "../dynoplan/include/dynoplan/optimization/multirobot_optimization.hpp"
 
@@ -38,6 +38,14 @@ namespace ob = ompl::base;
 namespace oc = ompl::control;
 
 namespace dbcbs {
+
+  namespace {
+    struct CoGuard {
+      std::vector<fcl::CollisionObjectf*>* v{};
+      explicit CoGuard(std::vector<fcl::CollisionObjectf*>* vv) : v(vv) {}
+      ~CoGuard(){ if(v) for (auto* p : *v) delete p; }
+    };
+  } // namespace
 
 // ---------------- internal helpers ----------------
 
@@ -167,18 +175,53 @@ bool solve(const Environment& env,
     fcl::Vector3f(env.minx, env.miny, -1),
     fcl::Vector3f(env.maxx, env.maxy,  1));
 
-  // obstacles
+  // obstacles (polygons, capsules, circles, boxes)
   std::vector<fcl::CollisionObjectf*> obstacles;
-  obstacles.reserve(env.obstacles.size());
-  std::vector<std::shared_ptr<fcl::CollisionGeometryf>> obst_geoms; obst_geoms.reserve(env.obstacles.size());
-  for (const auto& o : env.obstacles) {
-    std::shared_ptr<fcl::CollisionGeometryf> geom(new fcl::Boxf(o.sx, o.sy, 1.0));
-    auto co = new fcl::CollisionObjectf(geom);
-    co->setTranslation(fcl::Vector3f(o.cx, o.cy, 0));
-    co->computeAABB();
-    obstacles.push_back(co);
-    obst_geoms.push_back(geom);
+  std::vector<std::shared_ptr<fcl::CollisionGeometryf>> obst_geoms;
+  {
+    bool built = false;
+
+    if (!env.obstacles_yaml.empty()) {
+      try {
+        YAML::Node snip = YAML::Load(env.obstacles_yaml);
+
+        // Normalize to an envMap that contains "obstacles"
+        YAML::Node envMap;
+        if (snip && snip.IsMap() && snip["obstacles"]) {
+          // already an environment-like map { ... , obstacles: [...] }
+          envMap = snip;
+        } else if (snip && snip.IsMap() && snip["environment"]) {
+          // full problem snippet { environment: { obstacles: [...] , ... } }
+          envMap = snip["environment"];
+        } else if (snip && snip.IsSequence()) {
+          // plain obstacles list -> wrap it
+          envMap = YAML::Node(YAML::NodeType::Map);
+          envMap["obstacles"] = snip;
+        } else {
+          throw std::runtime_error("obstacles_yaml must be either a sequence or a map with 'obstacles' (or 'environment').");
+        }
+
+        built = buildEnvironmentObstaclesFCL(envMap, obstacles, /*prismThicknessZ=*/1.0f);
+      } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("dbcbs_core: obstacles_yaml parse/build error: ") + e.what());
+      }
+    }
+
+    // Legacy fallback: axis-aligned boxes
+    if (!built) {
+      obstacles.reserve(env.obstacles.size());
+      obst_geoms.reserve(env.obstacles.size());
+      for (const auto& o : env.obstacles) {
+        auto geom = std::make_shared<fcl::Boxf>(o.sx, o.sy, 1.0f);
+        auto* co  = new fcl::CollisionObjectf(geom);
+        co->setTranslation(fcl::Vector3f(o.cx, o.cy, 0));
+        co->computeAABB();
+        obstacles.push_back(co);
+        obst_geoms.push_back(std::move(geom));
+      }
+    }
   }
+  CoGuard obstacles_guard(&obstacles); // ensure we free the raw FCL objects on all exit paths
 
   // robots + motion libraries
   std::vector<std::shared_ptr<Robot>> robots;

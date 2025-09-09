@@ -22,7 +22,15 @@ struct RobotSpec {
 
 struct Environment {
   float minx{}, miny{}, maxx{}, maxy{};
-  std::vector<BoxObs> obstacles;     // axis-aligned boxes (size sx, sy)
+
+  // Legacy (boxes-only) — still supported
+  std::vector<BoxObs> obstacles;
+
+  // NEW: if non-empty, this YAML snippet is used to build FCL obstacles.
+  // It can be either:
+  //  - a full "environment" map with "obstacles"
+  //  - OR a plain sequence that is the "obstacles" array
+  std::string obstacles_yaml;
 };
 
 struct Settings {

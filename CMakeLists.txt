@@ -85,6 +85,10 @@ add_library(dbcbs_core STATIC
         src/robots.cpp
         lib/dbcbs_core.cpp
 )
+target_sources(dbcbs_core PRIVATE
+        lib/obstacles_yaml.cpp
+)
+
 add_library(dbcbs::core ALIAS dbcbs_core)
 
 target_compile_features(dbcbs_core PUBLIC cxx_std_17)
@@ -136,7 +140,9 @@ target_link_libraries(dbcbs_core PRIVATE idbastar::optimization)
 if (DBCBS_BUILD_DRIVER)
     add_executable(dbcbs src/db_cbs.cpp)
     target_compile_features(dbcbs PRIVATE cxx_std_17)
-
+    target_sources(dbcbs PRIVATE
+            lib/obstacles_yaml.cpp
+    )
     target_link_libraries(dbcbs PRIVATE
             dbcbs::core
             Boost::program_options
