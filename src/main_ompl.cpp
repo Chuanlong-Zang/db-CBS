@@ -19,7 +19,7 @@
 #include "robots.h"
 #include "robotStatePropagator.hpp"
 #include "fclStateValidityChecker.hpp"
-
+#include "../lib/obstacles_yaml.hpp"
 
 namespace ob = ompl::base;
 namespace oc = ompl::control;
@@ -60,25 +60,18 @@ int main(int argc, char* argv[]) {
   // load problem description
   YAML::Node env = YAML::LoadFile(inputFile);
 
-  std::vector<fcl::CollisionObjectf *> obstacles;
-  for (const auto &obs : env["environment"]["obstacles"])
+  std::vector<fcl::CollisionObjectf*> obstacles;
   {
-    if (obs["type"].as<std::string>() == "box")
-    {
-      const auto &size = obs["size"];
-      std::shared_ptr<fcl::CollisionGeometryf> geom;
-      geom.reset(new fcl::Boxf(size[0].as<float>(), size[1].as<float>(), 1.0));
-      const auto &center = obs["center"];
-      auto co = new fcl::CollisionObjectf(geom);
-      co->setTranslation(fcl::Vector3f(center[0].as<float>(), center[1].as<float>(), 0));
-      co->computeAABB();
-      obstacles.push_back(co);
-    }
-    else
-    {
-      throw std::runtime_error("Unknown obstacle type!");
+    if (!buildEnvironmentObstaclesFCL(env["environment"], obstacles, /*thicknessZ*/1.0f)) {
+      throw std::runtime_error("Failed to parse/build environment obstacles.");
     }
   }
+  // RAII cleanup
+  struct CoGuard { std::vector<fcl::CollisionObjectf*>* v{};
+    explicit CoGuard(std::vector<fcl::CollisionObjectf*>* vv):v(vv){}
+    ~CoGuard(){ if(v) for (auto* p:*v) delete p; }
+  } obst_guard(&obstacles);
+
   std::shared_ptr<fcl::BroadPhaseCollisionManagerf> bpcm_env(new fcl::DynamicAABBTreeCollisionManagerf());
   // std::shared_ptr<fcl::BroadPhaseCollisionManagerf> bpcm_env(new fcl::NaiveCollisionManagerf());
   bpcm_env->registerObjects(obstacles);
@@ -100,6 +93,32 @@ int main(int argc, char* argv[]) {
 
   for (const auto &robot_node : env["robots"]) {
     auto robotType = robot_node["type"].as<std::string>();
+    ShapeSpec shape; // default: use robot hardcoded footprint
+    if (robot_node["footprint"]) {
+      const auto& fp = robot_node["footprint"];
+      const auto s = fp["shape"] ? fp["shape"].as<std::string>() : std::string{};
+      if (s == "circle") {
+        shape.kind = ShapeSpec::Kind::Circle;
+        shape.radius = fp["radius"] ? fp["radius"].as<float>() : 0.0f;
+      } else if (s == "box") {
+        shape.kind = ShapeSpec::Kind::Box;
+        if (fp["size"] && fp["size"].IsSequence() && fp["size"].size()>=2) {
+          shape.sx = fp["size"][0].as<float>();
+          shape.sy = fp["size"][1].as<float>();
+        }
+      } else if (s == "multibox") {
+        shape.kind = ShapeSpec::Kind::MultiBox;
+        if (fp["boxes"] && fp["boxes"].IsSequence()) {
+          for (const auto& b : fp["boxes"]) {
+            ShapeBoxPart p;
+            if (b["size"])   { p.sx = b["size"][0].as<float>(); p.sy = b["size"][1].as<float>(); }
+            if (b["center"]) { p.cx = b["center"][0].as<float>(); p.cy = b["center"][1].as<float>(); }
+            if (b["angle"])  p.angle = b["angle"].as<float>();
+            shape.parts.push_back(p);
+          }
+        }
+      }
+    }
     std::shared_ptr<Robot> robot = create_robot(robotType, position_bounds);
     robots.push_back(robot);
     for (const auto& v : robot_node["start"]) {

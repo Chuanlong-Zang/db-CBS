@@ -24,18 +24,20 @@ struct RobotMeta {
     Footprint fp;
 };
 
-// ---- Problem spec -----------------------------------------------------------
 struct ProblemSpec {
-    // Workspace bounds [min=(x,y), max=(x,y)]
     double min_x{0.0}, min_y{0.0};
     double max_x{10.0}, max_y{10.0};
 
+    // Legacy AABB boxes (kept for backward compat)
     std::vector<BoxObs> obstacles;
 
-    // Robots: each provides type/meta + start and goal (full state vectors)
+    // NEW: full obstacles snippet (either a sequence of obstacles,
+    // or an {environment:{obstacles:[...]}} map). If non-empty, overrides 'obstacles'.
+    std::string obstacles_yaml;
+
     struct Robot {
         RobotMeta meta;
-        std::vector<double> start; // x,y,theta... (as required by type)
+        std::vector<double> start;
         std::vector<double> goal;
     };
     std::vector<Robot> robots;

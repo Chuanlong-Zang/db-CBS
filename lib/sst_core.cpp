@@ -13,7 +13,7 @@
 #include <ompl/control/planners/rrt/RRT.h>
 #include <ompl/control/planners/sst/SST.h>
 #include <ompl/base/objectives/ControlDurationObjective.h>
-
+#include "obstacles_yaml.hpp"
 #include "robots.h"
 #include "robotStatePropagator.hpp"
 #include "fclStateValidityChecker.hpp"
@@ -55,19 +55,46 @@ bool sst_solve(const ProblemSpec& P,
 {
     out = SSTResult{};
 
-    // 1) Obstacles -> FCL
+    // 1) Obstacles -> FCL (polygons/circles/capsules/boxes)
     std::vector<fcl::CollisionObjectf*> obstacles;
-    obstacles.reserve(P.obstacles.size());
-    for (const auto& o : P.obstacles) {
-        auto geom = std::make_shared<fcl::Boxf>(static_cast<float>(o.sx),
-                                                static_cast<float>(o.sy),
-                                                1.0f);
-        auto co = new fcl::CollisionObjectf(geom);
-        co->setTranslation(fcl::Vector3f(static_cast<float>(o.cx),
-                                         static_cast<float>(o.cy), 0.f));
-        co->computeAABB();
-        obstacles.push_back(co);
+    {
+        bool built = false;
+        if (!P.obstacles_yaml.empty()) {
+            try {
+                YAML::Node snip = YAML::Load(P.obstacles_yaml);
+                YAML::Node envMap;
+                if (snip && snip.IsMap() && snip["environment"])       envMap = snip["environment"];
+                else if (snip && snip.IsMap() && snip["obstacles"])    envMap = snip;
+                else if (snip && snip.IsSequence()) {
+                    envMap = YAML::Node(YAML::NodeType::Map);
+                    envMap["obstacles"] = snip;
+                }
+                if (envMap) built = buildEnvironmentObstaclesFCL(envMap, obstacles, /*thicknessZ*/1.0f);
+            } catch (const std::exception& e) {
+                std::cerr << "sst_core: obstacles_yaml parse/build error: " << e.what() << std::endl;
+            }
+        }
+        if (!built) {
+            // legacy AABB fallback
+            obstacles.reserve(P.obstacles.size());
+            for (const auto& o : P.obstacles) {
+                auto geom = std::make_shared<fcl::Boxf>(static_cast<float>(o.sx),
+                                                        static_cast<float>(o.sy),
+                                                        1.0f);
+                auto* co = new fcl::CollisionObjectf(geom);
+                co->setTranslation(fcl::Vector3f(static_cast<float>(o.cx),
+                                                 static_cast<float>(o.cy), 0.0f));
+                co->computeAABB();
+                obstacles.push_back(co);
+            }
+        }
     }
+    // small RAII to free raw FCL objects on all exits
+    struct CoGuard { std::vector<fcl::CollisionObjectf*>* v{};
+        explicit CoGuard(std::vector<fcl::CollisionObjectf*>* vv):v(vv){}
+        ~CoGuard(){ if(v) for (auto* p:*v) delete p; }
+    } obst_guard(&obstacles);
+
     std::shared_ptr<fcl::BroadPhaseCollisionManagerf> bpcm_env(
         new fcl::DynamicAABBTreeCollisionManagerf());
     bpcm_env->registerObjects(obstacles);
