@@ -201,7 +201,7 @@ bool solve(const Environment& env,
           throw std::runtime_error("obstacles_yaml must be either a sequence or a map with 'obstacles' (or 'environment').");
         }
 
-        built = buildEnvironmentObstaclesFCL(envMap, obstacles, /*prismThicknessZ=*/1.0f);
+        built = buildEnvironmentObstaclesFCL(envMap, obstacles, /*prismThicknessZ=*/0.1f);
       } catch (const std::exception& e) {
         throw std::runtime_error(std::string("dbcbs_core: obstacles_yaml parse/build error: ") + e.what());
       }

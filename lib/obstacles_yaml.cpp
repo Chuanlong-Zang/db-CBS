@@ -3,6 +3,8 @@
 #include <Eigen/Dense>
 #include <memory>
 #include <cmath>
+#include <fcl/common/types.h>              // for fcl::Vector3f (and aliases)
+#include <fcl/geometry/shape/convex.h>
 
 namespace {
 template <typename T>
@@ -43,56 +45,86 @@ inline Eigen::Matrix3f rotAlignLocalXtoXYDir(const Eigen::Vector2f& dir) {
     return R;
 }
 
-    // Build a convex prism from a CCW 2D polygon. No holes. Thickness in Z.
-    std::shared_ptr<fcl::CollisionGeometryf>
-    makeConvexPrism(const std::vector<Eigen::Vector2f>& poly, float thicknessZ)
-{
-    const int N = static_cast<int>(poly.size());
-    if (N < 3) return nullptr;
+    static inline double signedArea2(const std::vector<Eigen::Vector2f>& P) {
+    double A=0; int n=(int)P.size(); for (int i=0,j=n-1;i<n;j=i++)
+        A += (double)P[j].x()*P[i].y() - (double)P[i].x()*P[j].y();
+    return A; // >0 => CCW
+}
 
+    static inline bool sanitizeConvexLoop(std::vector<Eigen::Vector2f>& poly) {
+    if (poly.size() < 3) return false;
+    // drop closing duplicate
+    if ((poly.front() - poly.back()).squaredNorm() < 1e-12f) poly.pop_back();
+    if (poly.size() < 3) return false;
+
+    // drop consecutive duplicates / colinear middles
+    std::vector<Eigen::Vector2f> q; q.reserve(poly.size());
+    auto colinear = [](const Eigen::Vector2f& a,const Eigen::Vector2f& b,const Eigen::Vector2f& c){
+        Eigen::Vector2f u=b-a, v=c-b; return std::abs(u.x()*v.y()-u.y()*v.x()) <= 1e-8f;
+    };
+    for (size_t i=0;i<poly.size();++i){
+        const auto& prev = poly[(i+poly.size()-1)%poly.size()];
+        const auto& curr = poly[i];
+        const auto& next = poly[(i+1)%poly.size()];
+        if ((curr-prev).squaredNorm() < 1e-14f) continue;
+        if (colinear(prev,curr,next)) continue;
+        q.push_back(curr);
+    }
+    poly.swap(q);
+    if (poly.size() < 3) return false;
+
+    // enforce CCW
+    if (signedArea2(poly) < 0.0) std::reverse(poly.begin(), poly.end());
+
+    // skip tiny area (scale for your [0,50] world)
+    const double A = 0.5 * std::abs(signedArea2(poly));
+    if (A < 1e-8) return false;
+
+    // skip tiny bbox (sliver)
+    float minx=poly[0].x(), maxx=minx, miny=poly[0].y(), maxy=miny;
+    for (auto& p: poly){ minx=std::min(minx,p.x()); maxx=std::max(maxx,p.x());
+        miny=std::min(miny,p.y()); maxy=std::max(maxy,p.y()); }
+    if ((maxx-minx) < 1e-4f || (maxy-miny) < 1e-4f) return false;
+
+    return true;
+}
+    std::shared_ptr<fcl::CollisionGeometryf>
+    makeTriPrism(const std::vector<Eigen::Vector2f>& poly_in, float thicknessZ)
+{
+    std::vector<Eigen::Vector2f> poly = poly_in;
+    if (!sanitizeConvexLoop(poly)) return nullptr;
+
+    const int N = (int)poly.size();
     const float hz = 0.5f * std::max(thicknessZ, 1e-3f);
 
-    // ---- 2N vertices: bottom (z=-hz), then top (z=+hz) ----
-    std::vector<Eigen::Vector3f> pts;
-    pts.reserve(2 * N);
-    for (int i = 0; i < N; ++i)
-        pts.emplace_back(poly[i].x(), poly[i].y(), -hz);
-    for (int i = 0; i < N; ++i)
-        pts.emplace_back(poly[i].x(), poly[i].y(), +hz);
+    using V3 = fcl::Vector3f;
+    using Tri = fcl::Triangle;
+    using BVH = fcl::BVHModel<fcl::OBBRSSf>;
 
-    // ---- Faces encoded as [count, i0, i1, ...] ----
-    // Bottom face (reverse order for outward normal)
-    std::vector<int> faces;
-    faces.reserve((1 + N) + (1 + N) + N * (1 + 4)); // rough reservation
-    faces.push_back(N);
-    for (int i = N - 1; i >= 0; --i) faces.push_back(i);
+    std::vector<V3> V; V.reserve(2*N);
+    for (int i=0;i<N;++i) V.emplace_back(poly[i].x(), poly[i].y(), -hz); // bottom
+    for (int i=0;i<N;++i) V.emplace_back(poly[i].x(), poly[i].y(), +hz); // top
 
-    // Top face (CCW as given)
-    faces.push_back(N);
-    for (int i = 0; i < N; ++i) faces.push_back(N + i);
+    std::vector<Tri> T; T.reserve(2*(N-2) + 2*N);
 
-    // Side quads: (i, i+1, N+i+1, N+i)
-    for (int i = 0; i < N; ++i) {
-        const int i2 = (i + 1) % N;
-        faces.push_back(4);
-        faces.push_back(i);
-        faces.push_back(i2);
-        faces.push_back(N + i2);
-        faces.push_back(N + i);
+    // bottom fan (reverse winding for outward -Z)
+    for (int i=1;i<N-1;++i) T.emplace_back(0, i+1, i);
+
+    // top fan (as-given, outward +Z)
+    for (int i=1;i<N-1;++i) T.emplace_back(N+0, N+i, N+i+1);
+
+    // sides: two triangles per edge (outward)
+    for (int i=0;i<N;++i) {
+        int j = (i+1)%N;
+        T.emplace_back(i, j, N+j);
+        T.emplace_back(i, N+j, N+i);
     }
 
-    const int num_polygons = 2 + N;
-
-    // FCL expects shared_ptr to const vectors plus counts
-    auto pts_sp   = std::make_shared<const std::vector<Eigen::Vector3f>>(std::move(pts));
-    auto faces_sp = std::make_shared<const std::vector<int>>(std::move(faces));
-
-    // Most portable ctor across 0.5/0.6:
-    auto convex = std::make_shared<fcl::Convexf>(
-        pts_sp, static_cast<int>(pts_sp->size()),
-        faces_sp, num_polygons);
-
-    return std::static_pointer_cast<fcl::CollisionGeometryf>(convex);
+    auto model = std::make_shared<BVH>();
+    model->beginModel((int)T.size(), (int)V.size());
+    model->addSubModel(V, T);
+    model->endModel();
+    return model;
 }
 } // namespace
 
@@ -148,7 +180,7 @@ bool buildEnvironmentObstaclesFCL(
             }
             if (poly.size() < 3) continue;
 
-            auto geom = makeConvexPrism(poly, prismThicknessZ);
+            auto geom = makeTriPrism(poly, prismThicknessZ);
             if (!geom) continue;
 
             auto* co = new fcl::CollisionObjectf(geom);
