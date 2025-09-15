@@ -547,8 +547,13 @@ bool optimize_to_yaml(const std::string& problem_yaml,
   try {
     const bool feasible = execute_optimizationMultiRobot(
       problem_yaml, solution_yaml, opt_yaml, DBCBS_DYNOBENCH_BASE, sum_robot_cost);
-    (void)feasible; // we don’t trust/require this; caller parses opt.yaml regardless
-    return true;
+
+    // Consider success only if the optimizer actually wrote a non-empty file.
+    std::error_code ec;
+    const auto sz = fs::file_size(opt_yaml, ec);
+
+    (void)feasible; // feasibility flag is not trusted by caller anyway
+    return (!ec && sz > 0);
   } catch (...) {
     return false;
   }
