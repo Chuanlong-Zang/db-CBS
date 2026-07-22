@@ -9,4 +9,4 @@
 	url =  https://github.com/IMRCLab/s2m2.git
 [submodule "dynoplan"]
 	path = dynoplan
-	url = https://github.com/quimortiz/dynoplan.git
+	url = https://github.com/Chuanlong-Zang/dynoplan.git
